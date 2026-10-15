@@ -1,0 +1,229 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Smart School Attendance</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #f1f5f9;
+  margin: 0;
+  color: #172554;
+}
+header {
+  background: #173b70;
+  color: white;
+  padding: 22px;
+  text-align: center;
+}
+main {
+  max-width: 900px;
+  margin: 25px auto;
+  padding: 15px;
+}
+.cards {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.card {
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  flex: 1;
+  min-width: 130px;
+  box-shadow: 0 2px 8px #dbe3ef;
+}
+form, .table-box {
+  background: white;
+  padding: 20px;
+  margin-top: 20px;
+  border-radius: 12px;
+}
+input, button {
+  padding: 11px;
+  margin: 5px 3px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+}
+button {
+  background: #2459a9;
+  color: white;
+  cursor: pointer;
+  border: none;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 15px;
+}
+th, td {
+  padding: 10px;
+  border-bottom: 1px solid #ddd;
+  text-align: left;
+}
+.table-box { overflow-x: auto; }
+.present { color: green; }
+.absent { color: #c2410c; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AI Smart School Attendance</h1>
+  <p>Student Attendance Management Dashboard</p>
+</header>
+
+<main>
+  <div class="cards">
+    <div class="card">
+      Total Students
+      <h2 id="total">0</h2>
+    </div>
+    <div class="card">
+      Present Today
+      <h2 id="present">0</h2>
+    </div>
+    <div class="card">
+      Absent Today
+      <h2 id="absent">0</h2>
+    </div>
+  </div>
+
+  <form id="studentForm">
+    <h2>Register Student</h2>
+    <input id="sid" placeholder="Student ID" required>
+    <input id="sname" placeholder="Student Name" required>
+    <button type="submit">Add Student</button>
+  </form>
+
+  <section class="table-box">
+    <h2>Attendance Records</h2>
+    <p id="today"></p>
+    <button onclick="markAllAbsent()">Mark All Absent</button>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="records"></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+const KEY = "schoolAttendanceDemo";
+let students = JSON.parse(
+  localStorage.getItem(KEY) || "[]"
+);
+const today = new Date().toLocaleDateString("en-CA");
+
+document.getElementById("today").textContent =
+  "Date: " + today;
+
+function save() {
+  localStorage.setItem(KEY, JSON.stringify(students));
+  render();
+}
+
+document.getElementById("studentForm")
+.addEventListener("submit", function(e) {
+  e.preventDefault();
+
+  const id = document.getElementById("sid")
+    .value.trim();
+  const name = document.getElementById("sname")
+    .value.trim();
+
+  if (students.some(s => s.id === id)) {
+    alert("Student ID already exists!");
+    return;
+  }
+
+  students.push({
+    id, name, date: today, status: "Not Marked"
+  });
+
+  this.reset();
+  save();
+});
+
+function mark(id, status) {
+  const student = students.find(s => s.id === id);
+  if (!student) return;
+
+  if (student.date !== today) {
+    student.date = today;
+    student.status = status;
+  } else {
+    student.status = status;
+  }
+  save();
+}
+
+function markAllAbsent() {
+  students.forEach(s => {
+    s.date = today;
+    s.status = "Absent";
+  });
+  save();
+}
+
+function render() {
+  const present = students.filter(
+    s => s.date === today && s.status === "Present"
+  ).length;
+
+  const absent = students.filter(
+    s => s.date === today && s.status === "Absent"
+  ).length;
+
+  document.getElementById("total").textContent =
+    students.length;
+  document.getElementById("present").textContent =
+    present;
+  document.getElementById("absent").textContent =
+    absent;
+
+  document.getElementById("records").innerHTML =
+    students.map(s => `
+      <tr>
+        <td>${escapeHTML(s.id)}</td>
+        <td>${escapeHTML(s.name)}</td>
+        <td class="${s.status === 'Present' ?
+          'present' : 'absent'}">
+          ${s.date === today ? s.status : 'Not Marked'}
+        </td>
+        <td>
+          <button data-id="${escapeHTML(s.id)}"
+            data-status="Present">Present</button>
+          <button data-id="${escapeHTML(s.id)}"
+            data-status="Absent">Absent</button>
+        </td>
+      </tr>
+    `).join("");
+
+  document.querySelectorAll("#records button")
+    .forEach(button => {
+      button.addEventListener("click", () => {
+        mark(button.dataset.id, button.dataset.status);
+      });
+    });
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;",
+    '"': "&quot;", "'": "&#39;"
+  })[ch]);
+}
+
+render();
+</script>
+</body>
+</html>
