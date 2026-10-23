@@ -1,0 +1,1687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Smart School Attendance System</title>
+  <link rel="icon" href="data:,">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#eef2ff', 500: '#4f46e5', 600: '#4338ca', 700: '#3730a3' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+
+    body {
+      background:
+        radial-gradient(ellipse at 15% 0%, rgba(224, 231, 255, .7), transparent 36rem),
+        radial-gradient(ellipse at 85% 100%, rgba(243, 232, 255, .5), transparent 32rem),
+        #f8fafc;
+      color: #1e293b;
+    }
+
+    .app-header {
+      background:
+        radial-gradient(ellipse at 85% -35%, rgba(129, 140, 248, .35), transparent 45%),
+        linear-gradient(135deg, #0f172a 0%, #1e1b4b 60%, #312e81 100%);
+      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, .3);
+    }
+
+    .brand-mark {
+      background: linear-gradient(135deg, #6366f1, #4338ca);
+      box-shadow: 0 8px 18px rgba(99, 102, 241, .35);
+    }
+
+    .main-nav {
+      top: 0;
+      border-color: #e2e8f0;
+      box-shadow: 0 4px 20px -2px rgba(15, 23, 42, .04);
+    }
+
+    .main-nav > div {
+      scrollbar-width: none;
+    }
+
+    .main-nav > div::-webkit-scrollbar {
+      display: none;
+    }
+
+    .tab-btn {
+      margin: .35rem 0;
+      padding: .65rem 1rem;
+      border-radius: .85rem;
+      transition: all .2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .tab-btn[aria-current="page"] {
+      background: #eef2ff;
+      color: #4f46e5;
+      box-shadow: inset 0 0 0 1px rgba(99, 102, 241, .15);
+    }
+
+    .tab-btn:hover:not([aria-current="page"]) {
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+
+    .dashboard-main {
+      padding-top: 1.75rem;
+      padding-bottom: 3rem;
+    }
+
+    .page-title {
+      font-size: clamp(1.4rem, 2.2vw, 1.85rem);
+      font-weight: 800;
+      letter-spacing: -.03em;
+    }
+
+    .camera-card {
+      border-color: rgba(226, 232, 240, .8);
+      box-shadow: 0 12px 36px -4px rgba(15, 23, 42, .06);
+    }
+
+    .camera-viewport {
+      aspect-ratio: 16 / 10;
+      min-height: 320px;
+      background: radial-gradient(circle at center, #1e293b 0%, #090d16 100%);
+      border: 1px solid #334155;
+    }
+
+    .hud-corner {
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      border-color: #6366f1;
+      opacity: .8;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .hud-tl { top: 12px; left: 12px; border-top: 2px solid; border-left: 2px solid; }
+    .hud-tr { top: 12px; right: 12px; border-top: 2px solid; border-right: 2px solid; }
+    .hud-bl { bottom: 12px; left: 12px; border-bottom: 2px solid; border-left: 2px solid; }
+    .hud-br { bottom: 12px; right: 12px; border-bottom: 2px solid; border-right: 2px solid; }
+
+    .camera-scan-line {
+      position: absolute;
+      z-index: 15;
+      top: 0;
+      right: 2%;
+      left: 2%;
+      height: 3px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, transparent, #38bdf8 20%, #818cf8 50%, #38bdf8 80%, transparent);
+      box-shadow: 0 0 16px 3px rgba(99, 102, 241, .75);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .camera-viewport.is-scanning .camera-scan-line {
+      animation: camera-scan 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    @keyframes camera-scan {
+      0% { top: 3%; opacity: 0; }
+      15% { opacity: 1; }
+      85% { opacity: 1; }
+      100% { top: 97%; opacity: 0; }
+    }
+
+    .metric-card {
+      transition: transform .2s ease, box-shadow .2s ease;
+      border-color: rgba(226, 232, 240, .8);
+    }
+    .metric-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, .06);
+    }
+
+    #checkin-list::-webkit-scrollbar {
+      width: 5px;
+    }
+    #checkin-list::-webkit-scrollbar-track {
+      background: #f8fafc;
+    }
+    #checkin-list::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 999px;
+    }
+
+    .toast-stack {
+      position: fixed;
+      right: 1.25rem;
+      bottom: 1.25rem;
+      z-index: 70;
+      display: grid;
+      width: min(24rem, calc(100vw - 2.5rem));
+      gap: .75rem;
+      pointer-events: none;
+    }
+
+    .toast {
+      display: flex;
+      align-items: flex-start;
+      gap: .75rem;
+      padding: .85rem 1.15rem;
+      border: 1px solid #e2e8f0;
+      border-radius: 1rem;
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 14px 35px rgba(15, 23, 42, .14);
+      animation: toast-in .25s cubic-bezier(0.16, 1, 0.3, 1);
+      pointer-events: auto;
+    }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(12px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    body {
+      background:
+        radial-gradient(ellipse at 8% 0%, rgba(224, 231, 255, .7), transparent 34rem),
+        radial-gradient(ellipse at 100% 45%, rgba(238, 242, 255, .65), transparent 30rem),
+        #f6f8fc;
+    }
+
+    .app-header {
+      background:
+        radial-gradient(ellipse at 80% -35%, rgba(129, 140, 248, .32), transparent 48%),
+        linear-gradient(120deg, #111827 0%, #1e1b4b 64%, #3730a3 100%);
+    }
+
+    .main-nav {
+      background: rgba(255, 255, 255, .9);
+      backdrop-filter: blur(16px);
+    }
+
+    .main-nav > div {
+      justify-content: center;
+    }
+
+    .tab-btn {
+      padding: .7rem 1.1rem;
+      border: 1px solid transparent;
+      color: #64748b;
+    }
+
+    .tab-btn[aria-current="page"] {
+      background: #eef2ff;
+      border-color: #dfe3ff;
+      color: #4f46e5;
+      box-shadow: 0 4px 12px rgba(79, 70, 229, .08);
+    }
+
+    .dashboard-main {
+      max-width: 1320px;
+      padding-top: 1.75rem;
+    }
+
+    .attendance-hero {
+      position: relative;
+      overflow: hidden;
+      padding: 1.4rem 1.6rem;
+      border-color: #e4e8f2;
+      background:
+        radial-gradient(ellipse at 100% 0%, rgba(224, 231, 255, .68), transparent 24rem),
+        #fff;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, .045);
+    }
+
+    .attendance-hero > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .page-title {
+      color: #111827;
+    }
+
+    .camera-card,
+    .checkins-card,
+    .content-panel {
+      border-color: #e5e9f2;
+      border-radius: 1.25rem;
+      box-shadow: 0 12px 32px rgba(15, 23, 42, .055);
+    }
+
+    .camera-card {
+      padding: 1.25rem;
+    }
+
+    .camera-viewport {
+      border-radius: 1rem;
+      box-shadow: inset 0 1px 12px rgba(0, 0, 0, .2);
+    }
+
+    #attendance-camera-viewport {
+      height: clamp(290px, 34vw, 430px);
+      min-height: 0;
+      aspect-ratio: auto;
+    }
+
+    .content-panel .camera-viewport {
+      height: clamp(210px, 38vw, 360px);
+      min-height: 0;
+      aspect-ratio: auto;
+    }
+
+    .metric-card {
+      border-radius: 1.1rem;
+      box-shadow: 0 5px 16px rgba(15, 23, 42, .035);
+    }
+
+    .metric-card::before {
+      position: absolute;
+      top: 0;
+      right: 1rem;
+      left: 1rem;
+      height: 2px;
+      border-radius: 0 0 999px 999px;
+      background: linear-gradient(90deg, transparent, rgba(99, 102, 241, .38), transparent);
+      content: "";
+    }
+
+    .checkins-card {
+      padding: 1.15rem;
+    }
+
+    .content-panel {
+      padding: clamp(1rem, 2vw, 1.75rem);
+    }
+
+    .content-panel table {
+      min-width: 600px;
+    }
+
+    .content-panel thead {
+      background: #f8fafc;
+    }
+
+    .content-panel th {
+      padding-top: .9rem;
+      padding-bottom: .9rem;
+    }
+
+    .content-panel tbody tr {
+      transition: background-color .15s ease;
+    }
+
+    input:not([type="checkbox"]),
+    select,
+    textarea {
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+
+    input:not([type="checkbox"]):focus,
+    select:focus,
+    textarea:focus {
+      border-color: #818cf8;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, .12);
+      outline: none;
+    }
+
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible {
+      outline: 3px solid rgba(99, 102, 241, .45);
+      outline-offset: 2px;
+    }
+
+    /* ---------- LOGIN SCREEN ---------- */
+    .login-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.25rem;
+      background:
+        radial-gradient(ellipse at 80% -35%, rgba(129, 140, 248, .32), transparent 48%),
+        linear-gradient(120deg, #111827 0%, #1e1b4b 64%, #3730a3 100%);
+    }
+
+    .login-card {
+      width: 100%;
+      max-width: 26rem;
+      background: #ffffff;
+      border-radius: 1.5rem;
+      padding: 2rem 1.75rem;
+      box-shadow: 0 25px 60px -12px rgba(15, 23, 42, .5);
+      border: 1px solid rgba(226, 232, 240, .8);
+      animation: login-in .35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes login-in {
+      from { opacity: 0; transform: translateY(16px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .login-card .brand-mark {
+      width: 3.5rem;
+      height: 3.5rem;
+      border-radius: 1.1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 1rem;
+    }
+
+    .login-input {
+      width: 100%;
+      padding: .8rem 1rem .8rem 2.75rem;
+      border-radius: .9rem;
+      border: 1px solid #cbd5e1;
+      font-size: .9rem;
+      background: #f8fafc;
+      transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+
+    .login-input:focus {
+      background: #fff;
+      border-color: #818cf8;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, .15);
+      outline: none;
+    }
+
+    .login-input-wrap {
+      position: relative;
+    }
+
+    .login-input-wrap > i {
+      position: absolute;
+      left: .9rem;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 1.05rem;
+      height: 1.05rem;
+      color: #94a3b8;
+      pointer-events: none;
+    }
+
+    .login-btn {
+      width: 100%;
+      padding: .85rem;
+      border-radius: .9rem;
+      font-weight: 700;
+      font-size: .9rem;
+      color: #fff;
+      background: linear-gradient(135deg, #6366f1, #4338ca);
+      box-shadow: 0 10px 22px -6px rgba(79, 70, 229, .55);
+      transition: transform .15s, box-shadow .15s, filter .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: .5rem;
+    }
+
+    .login-btn:hover { filter: brightness(1.06); }
+    .login-btn:active { transform: scale(.98); }
+    .login-btn:disabled { opacity: .6; cursor: not-allowed; }
+
+    .login-error {
+      display: none;
+      align-items: flex-start;
+      gap: .5rem;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c;
+      font-size: .75rem;
+      font-weight: 600;
+      padding: .65rem .85rem;
+      border-radius: .75rem;
+      margin-bottom: 1rem;
+    }
+    .login-error.show { display: flex; }
+
+    .admin-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: #4338ca;
+      background: #eef2ff;
+      border: 1px solid #dfe3ff;
+      padding: .35rem .7rem;
+      border-radius: 999px;
+    }
+
+    @media (max-width: 640px) {
+      .dashboard-main {
+        padding-top: 1rem;
+        padding-bottom: 2rem;
+      }
+
+      .attendance-hero {
+        padding: 1.1rem;
+      }
+
+      .attendance-hero .page-title {
+        font-size: 1.35rem;
+      }
+
+      #attendance-camera-viewport {
+        height: clamp(230px, 62vw, 340px);
+      }
+
+      .camera-card {
+        padding: 1rem;
+      }
+
+      .main-nav > div {
+        justify-content: flex-start;
+      }
+
+      .tab-btn {
+        padding: .6rem .8rem;
+        font-size: .8rem;
+      }
+
+      .app-header .max-w-7xl > div {
+        width: 100%;
+        min-width: 0;
+        justify-content: flex-start;
+      }
+
+      .app-header .brand-mark {
+        flex-shrink: 0;
+      }
+
+      .app-header .max-w-7xl > div > div:last-child {
+        min-width: 0;
+      }
+
+      .app-header h1 {
+        overflow-wrap: anywhere;
+      }
+
+      .attendance-title-row,
+      .camera-toolbar,
+      .content-panel .section-intro {
+        flex-wrap: wrap;
+      }
+
+      .camera-toolbar {
+        row-gap: .65rem;
+      }
+
+      .camera-toolbar #ai-status {
+        flex-shrink: 0;
+        margin-left: auto;
+      }
+
+      .content-panel .section-intro > div:last-child {
+        flex-wrap: wrap;
+      }
+
+      .content-panel .camera-viewport {
+        height: clamp(210px, 65vw, 320px);
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col font-sans">
+
+  <!-- ================= ADMIN LOGIN SCREEN ================= -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="brand-mark">
+        <i data-lucide="shield-check" class="w-7 h-7 text-white"></i>
+      </div>
+      <div class="text-center mb-6">
+        <div class="admin-badge mb-3"><i data-lucide="lock" class="w-3 h-3"></i> Admin Access</div>
+        <h1 class="text-xl font-extrabold tracking-tight text-slate-900">Admin Login</h1>
+        <p class="text-xs text-slate-500 mt-1.5">Sign in to access the AI Smart School Attendance System</p>
+      </div>
+
+      <form id="login-form" autocomplete="off">
+        <div id="login-error" class="login-error" role="alert">
+          <i data-lucide="circle-alert" class="w-4 h-4 shrink-0 mt-0.5"></i>
+          <span id="login-error-text">Invalid username or password.</span>
+        </div>
+
+        <div class="space-y-3.5">
+          <div>
+            <label for="login-username" class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">Username</label>
+            <div class="login-input-wrap">
+              <i data-lucide="user" class="w-4 h-4"></i>
+              <input id="login-username" name="username" type="text" required placeholder="Enter admin username" class="login-input" autocomplete="username">
+            </div>
+          </div>
+          <div>
+            <label for="login-password" class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">Password</label>
+            <div class="login-input-wrap">
+              <i data-lucide="key-round" class="w-4 h-4"></i>
+              <input id="login-password" name="password" type="password" required placeholder="Enter password" class="login-input" autocomplete="current-password">
+            </div>
+          </div>
+
+          <button id="login-submit" type="submit" class="login-btn mt-1">
+            <i data-lucide="log-in" class="w-4 h-4"></i> Sign In
+          </button>
+        </div>
+      </form>
+
+      <p class="text-center text-[11px] text-slate-400 mt-5 leading-relaxed">
+        Default credentials: <span class="font-semibold text-slate-500">admin / admin123</span><br>
+        Change them in the backend <code class="font-mono text-slate-500">ADMIN_CREDENTIALS</code>.
+      </p>
+    </div>
+  </div>
+
+  <!-- ================= MAIN APP (hidden until login) ================= -->
+  <div id="app-root" class="hidden flex-1 flex flex-col">
+
+    <!-- Header -->
+    <header class="app-header text-white relative z-40 border-b border-indigo-950/40">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-center">
+        <div class="flex items-center gap-3">
+          <div class="brand-mark p-2.5 rounded-2xl flex items-center justify-center">
+            <i data-lucide="scan-face" class="w-6 h-6 text-white"></i>
+          </div>
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h1 class="text-base sm:text-lg font-bold tracking-tight text-white leading-tight">AI Smart School Attendance System</h1>
+              <span class="inline-flex shrink-0 items-center px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide uppercase bg-indigo-500/30 text-indigo-200 border border-indigo-400/20">AI Engine</span>
+            </div>
+            <p class="text-xs text-indigo-200/80 font-medium" id="school-title">Sunrise Public School</p>
+          </div>
+        </div>
+        <div class="ml-auto flex items-center gap-3 pl-3">
+          <span class="hidden sm:inline text-xs text-indigo-200/80 font-medium" id="admin-username-label">admin</span>
+          <button type="button" onclick="logout()" id="btn-logout" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-semibold text-white transition">
+            <i data-lucide="log-out" class="w-3.5 h-3.5"></i> Logout
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="main-nav bg-white/80 backdrop-blur sticky z-30 border-b" aria-label="Main navigation">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 flex overflow-x-auto text-sm font-semibold gap-2 py-1">
+        <button type="button" onclick="switchTab('attend')" id="tab-attend" aria-current="page" class="tab-btn text-indigo-600 flex items-center gap-2 whitespace-nowrap">
+          <i data-lucide="camera" class="w-4 h-4"></i> Take Attendance
+        </button>
+        <button type="button" onclick="switchTab('register')" id="tab-register" class="tab-btn text-slate-500 flex items-center gap-2 whitespace-nowrap">
+          <i data-lucide="user-plus" class="w-4 h-4"></i> Register Student
+        </button>
+        <button type="button" onclick="switchTab('records')" id="tab-records" class="tab-btn text-slate-500 flex items-center gap-2 whitespace-nowrap">
+          <i data-lucide="clipboard-list" class="w-4 h-4"></i> Records
+        </button>
+        <button type="button" onclick="switchTab('students')" id="tab-students" class="tab-btn text-slate-500 flex items-center gap-2 whitespace-nowrap">
+          <i data-lucide="users" class="w-4 h-4"></i> Student Directory
+        </button>
+      </div>
+    </nav>
+
+    <!-- Main Container -->
+    <main class="dashboard-main max-w-7xl mx-auto px-4 sm:px-6 flex-1 w-full">
+
+      <!-- 1. TAB: ATTENDANCE -->
+      <section id="section-attend" class="space-y-6">
+
+        <div class="attendance-hero flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+          <div>
+            <div class="attendance-title-row flex items-center gap-2.5">
+              <h2 class="page-title text-slate-900">Live Attendance Portal</h2>
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Ready
+              </span>
+            </div>
+            <p class="text-xs sm:text-sm text-slate-500 mt-0.5">Stream video to automatically detect students and record daily presence in real-time.</p>
+          </div>
+          <div class="inline-flex items-center gap-2 bg-slate-50 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold text-slate-600 shadow-inner self-start sm:self-auto">
+            <i data-lucide="calendar" class="w-4 h-4 text-indigo-600"></i>
+            <span id="today-label"></span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+
+          <div class="camera-card lg:col-span-2 bg-white rounded-2xl border p-5 flex flex-col justify-between">
+            <div>
+              <div class="camera-toolbar flex items-center justify-between pb-3.5 mb-3 border-b border-slate-100">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center">
+                    <i data-lucide="video" class="w-4 h-4"></i>
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-bold text-slate-800">Biometric Recognition Stream</h3>
+                    <p class="text-[11px] text-slate-400">Position student face inside the scan area</p>
+                  </div>
+                </div>
+
+                <div id="ai-status" class="text-xs font-semibold px-3 py-1.5 rounded-full bg-slate-100 text-slate-600 flex items-center gap-1.5 transition-all">
+                  <span class="w-2 h-2 rounded-full bg-slate-400"></span> Camera Idle
+                </div>
+              </div>
+
+              <div id="attendance-camera-viewport" class="camera-viewport relative rounded-xl overflow-hidden flex items-center justify-center shadow-inner group">
+                <div class="hud-corner hud-tl"></div>
+                <div class="hud-corner hud-tr"></div>
+                <div class="hud-corner hud-bl"></div>
+                <div class="hud-corner hud-br"></div>
+
+                <video id="webcam" autoplay playsinline muted class="w-full h-full object-cover"></video>
+                <canvas id="overlay-canvas" class="absolute inset-0 w-full h-full pointer-events-none z-10"></canvas>
+                <div class="camera-scan-line" aria-hidden="true"></div>
+
+                <div id="cam-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 gap-3 bg-slate-950/70 backdrop-blur-[2px]">
+                  <div class="w-16 h-16 rounded-2xl bg-slate-800/80 border border-slate-700/80 flex items-center justify-center text-indigo-400 shadow-xl">
+                    <i data-lucide="scan" class="w-8 h-8 animate-pulse"></i>
+                  </div>
+                  <div class="text-center">
+                    <p class="text-sm font-semibold text-slate-200">Video feed is inactive</p>
+                    <p class="text-xs text-slate-400 mt-0.5">Click "Start Camera" to initialize the recognition model</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-4 pt-4 mt-4 border-t border-slate-100">
+              <div class="flex items-center gap-3">
+                <button id="btn-start-att" onclick="startAttendanceCamera()" class="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white rounded-xl text-sm font-semibold flex items-center gap-2 shadow-sm transition hover:shadow-indigo-500/25 active:scale-[0.98]">
+                  <i data-lucide="play" class="w-4 h-4 fill-white"></i> Start Camera
+                </button>
+                <button id="btn-stop-att" onclick="stopCamera()" disabled class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-semibold flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-40">
+                  <i data-lucide="square" class="w-4 h-4"></i> Stop
+                </button>
+              </div>
+
+              <label class="inline-flex items-center gap-2.5 text-xs text-slate-600 font-medium cursor-pointer select-none bg-slate-50 hover:bg-slate-100 px-3 py-2 rounded-xl border border-slate-200/70 transition">
+                <input type="checkbox" id="stop-after-match" class="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 border-slate-300">
+                <span>Auto-pause stream after each match</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="space-y-5">
+            <div class="grid grid-cols-2 gap-3.5">
+              <div class="metric-card bg-white rounded-2xl border p-4 shadow-sm relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Present</span>
+                  <div class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                    <i data-lucide="check" class="w-4 h-4"></i>
+                  </div>
+                </div>
+                <p id="stat-present" class="text-2xl sm:text-3xl font-extrabold text-emerald-600 mt-2">0</p>
+                <p class="text-[11px] text-slate-400 mt-0.5">Verified today</p>
+              </div>
+
+              <div class="metric-card bg-white rounded-2xl border p-4 shadow-sm relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Total</span>
+                  <div class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                    <i data-lucide="users" class="w-4 h-4"></i>
+                  </div>
+                </div>
+                <p id="stat-total" class="text-2xl sm:text-3xl font-extrabold text-indigo-600 mt-2">0</p>
+                <p class="text-[11px] text-slate-400 mt-0.5">Enrolled students</p>
+              </div>
+
+              <div class="metric-card bg-white rounded-2xl border p-4 shadow-sm relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Absent</span>
+                  <div class="w-7 h-7 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center">
+                    <i data-lucide="user-x" class="w-4 h-4"></i>
+                  </div>
+                </div>
+                <p id="stat-absent" class="text-2xl sm:text-3xl font-extrabold text-rose-500 mt-2">0</p>
+                <p class="text-[11px] text-slate-400 mt-0.5">Marked absent</p>
+              </div>
+
+              <div class="metric-card bg-white rounded-2xl border p-4 shadow-sm relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Pending</span>
+                  <div class="w-7 h-7 rounded-lg bg-amber-50 text-amber-500 flex items-center justify-center">
+                    <i data-lucide="clock" class="w-4 h-4"></i>
+                  </div>
+                </div>
+                <p id="stat-unmarked" class="text-2xl sm:text-3xl font-extrabold text-amber-500 mt-2">0</p>
+                <p class="text-[11px] text-slate-400 mt-0.5">Awaiting check-in</p>
+              </div>
+            </div>
+
+            <div class="checkins-card bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col">
+              <div class="flex items-center justify-between mb-3.5 pb-2 border-b border-slate-100">
+                <div class="flex items-center gap-2">
+                  <i data-lucide="list-checks" class="w-4 h-4 text-indigo-600"></i>
+                  <h3 class="text-sm font-bold text-slate-800">Recent Check-ins</h3>
+                </div>
+                <span class="text-[11px] font-semibold text-slate-400">Live feed</span>
+              </div>
+
+              <div id="checkin-list" class="overflow-y-auto space-y-2 pr-1 max-h-[220px]">
+                <div class="py-8 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
+                  <i data-lucide="inbox" class="w-6 h-6 text-slate-300"></i>
+                  No attendance marked yet today.
+                </div>
+              </div>
+
+              <div class="pt-3 border-t border-slate-100 mt-3">
+                <button onclick="markAbsentees()" class="w-full py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 active:scale-[0.99]">
+                  <i data-lucide="user-minus" class="w-3.5 h-3.5 text-rose-500"></i> Mark Remaining as Absent
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 2. TAB: REGISTER STUDENT -->
+      <section id="section-register" class="content-panel hidden max-w-5xl mx-auto bg-white rounded-2xl border p-6" aria-labelledby="register-heading">
+        <div class="section-intro flex items-center justify-between gap-1 mb-6">
+          <h2 id="register-heading" class="page-title text-slate-900">Register Student</h2>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+          <div class="space-y-4">
+            <div>
+              <label for="reg-roll" class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Roll Number</label>
+              <input type="text" id="reg-roll" autocomplete="off" required placeholder="e.g. 101, CS-22" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+              <p id="reg-roll-status" role="status" aria-live="polite" class="mt-1 text-xs text-slate-500">Enter a unique roll number.</p>
+            </div>
+            <div>
+              <label for="reg-name" class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Full Name</label>
+              <input type="text" id="reg-name" autocomplete="name" required placeholder="e.g. John Doe" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            </div>
+            <div>
+              <label for="reg-class" class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">Class / Grade</label>
+              <input type="text" id="reg-class" required placeholder="e.g. Grade 10-A" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            </div>
+
+            <div class="flex gap-2 pt-2">
+              <button type="button" id="btn-start-reg" onclick="startRegistrationProcess()" class="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-sm flex items-center justify-center gap-2 shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60">
+                <i data-lucide="camera" class="w-4 h-4"></i> Capture Face Samples
+              </button>
+              <button type="button" id="btn-cancel-reg" onclick="stopCamera()" class="hidden px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm transition">Cancel</button>
+            </div>
+            <div id="reg-feedback" role="status" aria-live="polite" class="text-xs font-medium text-center py-2 text-slate-500">
+              Ensure clear lighting and face straight toward the camera.
+            </div>
+          </div>
+
+          <div>
+            <div class="camera-viewport relative rounded-xl overflow-hidden border flex items-center justify-center">
+              <video id="reg-webcam" autoplay playsinline muted aria-label="Student registration camera preview" class="w-full h-full object-cover"></video>
+              <div class="camera-scan-line" aria-hidden="true"></div>
+              <div id="reg-overlay" class="absolute inset-0 bg-slate-900/60 backdrop-blur-[2px] flex flex-col items-center justify-center text-white p-4 text-center">
+                <span class="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center text-slate-300 mb-3"><i data-lucide="scan-face" class="w-7 h-7"></i></span>
+                <p id="reg-prompt" class="text-sm font-semibold">Camera preview is ready</p>
+              </div>
+            </div>
+            <div class="mt-3">
+              <div class="flex justify-between text-xs font-semibold text-slate-500 mb-1">
+                <span>Samples Collected</span>
+                <span id="reg-sample-count">0 / 10</span>
+              </div>
+              <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                <div id="reg-progress" class="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. TAB: RECORDS -->
+      <section id="section-records" class="content-panel hidden bg-white rounded-2xl border p-6" aria-labelledby="records-heading">
+        <div class="section-intro flex flex-wrap items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 id="records-heading" class="page-title text-slate-900">Attendance Records</h2>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <label class="sr-only" for="record-date">Filter records by date</label>
+            <input type="date" id="record-date" class="px-3 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <button type="button" onclick="fetchRecords()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition">
+              Filter
+            </button>
+            <a href="/api/export-report" download class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 transition">
+              <i data-lucide="download" class="w-4 h-4"></i> Export CSV
+            </a>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto rounded-xl border border-slate-100">
+          <div class="flex justify-end border-b border-slate-100 bg-slate-50/70 px-4 py-2">
+            <span id="records-count" class="text-xs text-slate-500">0 records</span>
+          </div>
+          <table class="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr class="border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider">
+                <th class="py-3 px-4 font-semibold">Time</th>
+                <th class="py-3 px-4 font-semibold">Roll No</th>
+                <th class="py-3 px-4 font-semibold">Name</th>
+                <th class="py-3 px-4 font-semibold">Class</th>
+                <th class="py-3 px-4 font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody id="records-table-body" class="divide-y divide-slate-100 text-slate-700">
+              <tr><td colspan="5" class="py-8 text-center text-slate-400">Choose a date to load attendance records.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 4. TAB: STUDENTS -->
+      <section id="section-students" class="content-panel hidden bg-white rounded-2xl border p-6" aria-labelledby="students-heading">
+        <div class="section-intro flex items-center justify-between gap-2 mb-6">
+          <div>
+            <h2 id="students-heading" class="page-title text-slate-900">Student Directory</h2>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="student-count-badge" class="px-3 py-1.5 bg-indigo-50 text-indigo-600 text-xs font-bold rounded-full border border-indigo-100">0 Enrolled</span>
+            <button type="button" onclick="switchTab('register')" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition">
+              <i data-lucide="user-plus" class="w-4 h-4"></i> Add student
+            </button>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto rounded-xl border border-slate-100">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr class="border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider">
+                <th class="py-3 px-4 font-semibold">Profile</th>
+                <th class="py-3 px-4 font-semibold">Roll No</th>
+                <th class="py-3 px-4 font-semibold">Name</th>
+                <th class="py-3 px-4 font-semibold">Class</th>
+                <th class="py-3 px-4 font-semibold text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="students-table-body" class="divide-y divide-slate-100 text-slate-700">
+              <tr><td colspan="5" class="py-8 text-center text-slate-400">Loading students...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- Auto-closing Success Modal for Match -->
+  <div id="match-modal" role="dialog" aria-modal="true" aria-labelledby="modal-name" aria-describedby="modal-details" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 text-center shadow-2xl transform transition-all animate-in fade-in zoom-in duration-200 border border-slate-100">
+      <div class="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3 shadow-inner">
+        <i data-lucide="check-circle" class="w-8 h-8"></i>
+      </div>
+      <div class="w-24 h-24 rounded-2xl bg-slate-100 mx-auto overflow-hidden border-2 border-emerald-500 mb-3 shadow-md">
+        <img id="modal-photo" src="" alt="Student" class="w-full h-full object-cover">
+      </div>
+      <h3 id="modal-name" class="text-xl font-extrabold text-slate-900">Student Name</h3>
+      <p id="modal-details" class="text-xs text-slate-500 mt-1 font-medium">Roll No: 101 • Grade 10-A</p>
+      <div class="mt-4 py-2 px-3 bg-emerald-50 text-emerald-700 font-bold rounded-xl text-sm border border-emerald-200" id="modal-time">
+        ✔ PRESENT at 10:45 AM
+      </div>
+      <button onclick="closeMatchModal()" class="mt-5 w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-semibold text-sm transition">
+        Dismiss
+      </button>
+    </div>
+  </div>
+
+  <!-- Audio Tone & Voice Announcement Script -->
+  <script>
+    function playBeep() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.setValueAtTime(800, ctx.currentTime);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+      } catch(e) {}
+    }
+
+    function speakText(text) {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.lang = 'en-US';
+        window.speechSynthesis.speak(utterance);
+      }
+    }
+  </script>
+
+  <!-- Main Application Logic -->
+  <script>
+    lucide.createIcons();
+    let currentStream = null;
+    let recognitionInterval = null;
+    let recognitionController = null;
+    let isProcessing = false;
+    let popupTimer = null;
+    let lastAnnouncedRoll = null;
+    let lastAnnouncedTime = 0;
+    let registrationRunId = 0;
+    let registrationInProgress = false;
+    let cameraRequestId = 0;
+    let rollCheckTimer = null;
+    let rollCheckRequestId = 0;
+
+    // ================= AUTH =================
+    const AUTH_STORAGE_KEY = 'ai_attendance_admin_session';
+    let currentAdmin = null;
+
+    function showLoginScreen() {
+      document.getElementById('login-screen').classList.remove('hidden');
+      document.getElementById('login-screen').style.display = 'flex';
+      document.getElementById('app-root').classList.add('hidden');
+      document.getElementById('login-screen').classList.remove('hidden');
+      setTimeout(() => document.getElementById('login-username').focus(), 100);
+    }
+
+    function showApp(username) {
+      currentAdmin = username;
+      document.getElementById('login-screen').classList.add('hidden');
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('app-root').classList.remove('hidden');
+      document.getElementById('admin-username-label').innerText = username || 'admin';
+      lucide.createIcons();
+    }
+
+    function applySession(username) {
+      try {
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ username, ts: Date.now() }));
+      } catch(e) {}
+    }
+
+    function clearSession() {
+      try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch(e) {}
+    }
+
+    function checkExistingSession() {
+      try {
+        const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        // Session valid for 12 hours
+        if (parsed && parsed.username && (Date.now() - parsed.ts) < 12 * 60 * 60 * 1000) {
+          return parsed.username;
+        }
+        return false;
+      } catch(e) { return false; }
+    }
+
+    function logout() {
+      clearSession();
+      if (currentStream) stopCamera();
+      currentAdmin = null;
+      showLoginScreen();
+      document.getElementById('login-username').value = '';
+      document.getElementById('login-password').value = '';
+      document.getElementById('login-error').classList.remove('show');
+    }
+
+    // Login form submit
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('login-username').value.trim();
+      const password = document.getElementById('login-password').value;
+      const errorBox = document.getElementById('login-error');
+      const errorText = document.getElementById('login-error-text');
+      const submitBtn = document.getElementById('login-submit');
+
+      errorBox.classList.remove('show');
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> Signing in...';
+      lucide.createIcons();
+
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail || 'Invalid username or password');
+        }
+        applySession(username);
+        document.getElementById('login-password').value = '';
+        showApp(username);
+      } catch (err) {
+        errorText.innerText = err.message || 'Login failed. Please try again.';
+        errorBox.classList.add('show');
+        document.getElementById('login-password').value = '';
+        document.getElementById('login-password').focus();
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i data-lucide="log-in" class="w-4 h-4"></i> Sign In';
+        lucide.createIcons();
+      }
+    });
+
+    // On page load: check session
+    (function bootstrap() {
+      const savedUser = checkExistingSession();
+      if (savedUser) {
+        showApp(savedUser);
+      } else {
+        showLoginScreen();
+      }
+    })();
+
+    // ================= EXISTING APP LOGIC =================
+    document.getElementById('reg-roll').addEventListener('input', () => {
+      clearTimeout(rollCheckTimer);
+      rollCheckTimer = setTimeout(() => checkRollAvailability(
+        document.getElementById('reg-roll').value.trim()
+      ), 250);
+    });
+
+    document.getElementById('record-date').value = new Date().toISOString().split('T')[0];
+    document.getElementById('today-label').innerText = new Date().toLocaleDateString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric'
+    });
+
+    // Load dashboard only after login (handled in showApp path)
+    // But we can still lazily call it once the app is visible.
+    function ensureDashboardLoaded() {
+      if (!document.getElementById('app-root').classList.contains('hidden')) {
+        loadDashboard();
+      }
+    }
+
+    function showToast(message, type = 'info') {
+      const stack = document.getElementById('toast-stack');
+      const toast = document.createElement('div');
+      const icon = type === 'success' ? 'circle-check' : type === 'error' ? 'circle-alert' : 'info';
+      toast.className = `toast toast-${type}`;
+      toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+      toast.innerHTML = `<i data-lucide="${icon}" class="w-4 h-4 mt-0.5 shrink-0"></i><span></span><button type="button" aria-label="Dismiss notification" class="ml-auto text-slate-400 hover:text-slate-700">×</button>`;
+      toast.querySelector('span').textContent = message;
+      toast.querySelector('button').addEventListener('click', () => toast.remove());
+      stack.appendChild(toast);
+      lucide.createIcons({ nodes: [toast] });
+      window.setTimeout(() => toast.remove(), 5000);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[character]);
+    }
+
+    async function checkRollAvailability(roll) {
+      const input = document.getElementById('reg-roll');
+      const status = document.getElementById('reg-roll-status');
+      const requestId = ++rollCheckRequestId;
+      if (!roll) {
+        input.removeAttribute('aria-invalid');
+        status.innerText = 'Enter a unique roll number.';
+        status.className = 'mt-1 text-xs text-slate-500';
+        return false;
+      }
+      if (!/^[A-Za-z0-9_-]+$/.test(roll)) {
+        input.setAttribute('aria-invalid', 'true');
+        status.innerText = "Use letters, numbers, '-' or '_' only.";
+        status.className = 'mt-1 text-xs text-rose-600';
+        return false;
+      }
+
+      status.innerText = 'Checking roll number...';
+      status.className = 'mt-1 text-xs text-slate-500';
+      try {
+        const query = new URLSearchParams({ roll });
+        const response = await fetch(`/api/students/check-roll?${query}`);
+        if (!response.ok) throw new Error(`Roll number check failed (${response.status})`);
+        const result = await response.json();
+        if (requestId !== rollCheckRequestId || input.value.trim() !== roll) return false;
+        input.toggleAttribute('aria-invalid', !result.available);
+        status.innerText = result.message;
+        status.className = `mt-1 text-xs ${result.available ? 'text-emerald-600' : 'text-rose-600'}`;
+        return result.available;
+      } catch (error) {
+        if (requestId === rollCheckRequestId) {
+          input.setAttribute('aria-invalid', 'true');
+          status.innerText = 'Could not verify this roll number. Please try again.';
+          status.className = 'mt-1 text-xs text-rose-600';
+          console.error('Roll number check failed:', error);
+        }
+        return false;
+      }
+    }
+
+    function switchTab(tabId) {
+      if (!['attend', 'register', 'records', 'students'].includes(tabId)) return;
+      stopCamera();
+      closeMatchModal();
+      ['attend', 'register', 'records', 'students'].forEach(t => {
+        document.getElementById(`section-${t}`).classList.add('hidden');
+        document.getElementById(`tab-${t}`).className = 'tab-btn text-slate-500 hover:text-slate-800 flex items-center gap-2 whitespace-nowrap';
+        document.getElementById(`tab-${t}`).removeAttribute('aria-current');
+      });
+      document.getElementById(`section-${tabId}`).classList.remove('hidden');
+      document.getElementById(`tab-${tabId}`).className = 'tab-btn text-indigo-600 flex items-center gap-2 whitespace-nowrap';
+      document.getElementById(`tab-${tabId}`).setAttribute('aria-current', 'page');
+      const navViewport = document.querySelector('.main-nav > div');
+      const activeTab = document.getElementById(`tab-${tabId}`);
+      const navBounds = navViewport.getBoundingClientRect();
+      const tabBounds = activeTab.getBoundingClientRect();
+      if (tabBounds.left < navBounds.left) navViewport.scrollLeft -= navBounds.left - tabBounds.left;
+      if (tabBounds.right > navBounds.right) navViewport.scrollLeft += tabBounds.right - navBounds.right;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      if (tabId === 'records') fetchRecords();
+      if (tabId === 'students') fetchStudents();
+      if (tabId === 'attend') loadDashboard();
+    }
+
+    async function loadDashboard() {
+      try {
+        const res = await fetch('/api/dashboard');
+        if (!res.ok) throw new Error(`Dashboard request failed (${res.status})`);
+        const data = await res.json();
+        document.getElementById('stat-present').innerText = data.present_today;
+        document.getElementById('stat-total').innerText = data.total_students;
+        document.getElementById('stat-absent').innerText = data.absent_today;
+        document.getElementById('stat-unmarked').innerText = data.unmarked_today;
+        document.getElementById('school-title').innerText = data.school_name;
+
+        const list = document.getElementById('checkin-list');
+        if (data.recent_attendance.length === 0) {
+          list.innerHTML = `
+            <div class="py-8 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
+              <i data-lucide="inbox" class="w-6 h-6 text-slate-300"></i>
+              No attendance marked yet today.
+            </div>`;
+          lucide.createIcons();
+        } else {
+          list.innerHTML = data.recent_attendance.map(r => `
+            <div class="py-2.5 px-3 rounded-xl bg-slate-50 hover:bg-slate-100/80 border border-slate-100 transition flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center shrink-0">
+                  ${escapeHtml(r.name ? r.name.charAt(0).toUpperCase() : '?')}
+                </div>
+                <div class="truncate">
+                  <p class="text-xs sm:text-sm font-bold text-slate-800 truncate">${escapeHtml(r.name)}</p>
+                  <p class="text-[11px] text-slate-400">Roll: ${escapeHtml(r.roll_no)} • ${escapeHtml(r.class)}</p>
+                </div>
+              </div>
+              <span class="text-[11px] font-extrabold text-emerald-700 bg-emerald-100/80 px-2.5 py-1 rounded-md shrink-0 border border-emerald-200/50">
+                ${escapeHtml((r.time || '--:--').slice(0, 5))}
+              </span>
+            </div>
+          `).join('');
+        }
+      } catch (err) {
+        console.error("Dashboard load failed:", err);
+        showToast("Couldn't load the attendance dashboard. Please try again.", 'error');
+      }
+    }
+
+    async function startAttendanceCamera() {
+      if (currentStream) return;
+      const video = document.getElementById('webcam');
+      const placeholder = document.getElementById('cam-placeholder');
+      const aiStatus = document.getElementById('ai-status');
+      const startButton = document.getElementById('btn-start-att');
+      const stopButton = document.getElementById('btn-stop-att');
+      const requestId = ++cameraRequestId;
+
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("Camera access is not available. Open this page on localhost or use HTTPS.");
+        }
+        startButton.disabled = true;
+        aiStatus.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span> Initializing...`;
+        aiStatus.className = "text-xs font-semibold px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1.5";
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+        });
+        if (requestId !== cameraRequestId) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+        currentStream = stream;
+        video.srcObject = currentStream;
+        await video.play();
+        if (requestId !== cameraRequestId) return;
+        placeholder.classList.add('hidden');
+        document.getElementById('attendance-camera-viewport').classList.add('is-scanning');
+
+        aiStatus.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Scanning Face...`;
+        aiStatus.className = "text-xs font-semibold px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5";
+        stopButton.disabled = false;
+
+        video.onloadedmetadata = () => {
+          if (currentStream && !recognitionInterval) recognitionInterval = setInterval(sendFrameToAI, 300);
+        };
+        if (video.readyState >= 2 && !recognitionInterval) recognitionInterval = setInterval(sendFrameToAI, 300);
+      } catch (err) {
+        if (requestId !== cameraRequestId) return;
+        stopCamera();
+        showToast("Camera couldn't start: " + err.message, 'error');
+      }
+    }
+
+    function stopCamera() {
+      cameraRequestId += 1;
+      registrationRunId += 1;
+      const wasRegistering = registrationInProgress;
+      registrationInProgress = false;
+      if (recognitionInterval !== null) {
+        clearInterval(recognitionInterval);
+        recognitionInterval = null;
+      }
+      if (recognitionController) {
+        recognitionController.abort();
+        recognitionController = null;
+      }
+      isProcessing = false;
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
+      }
+      const video = document.getElementById('webcam');
+      if (video) video.srcObject = null;
+      const regVideo = document.getElementById('reg-webcam');
+      if (regVideo) regVideo.srcObject = null;
+      document.querySelectorAll('.camera-viewport').forEach(viewport => {
+        viewport.classList.remove('is-scanning');
+      });
+      const regOverlay = document.getElementById('reg-overlay');
+      if (regOverlay) regOverlay.classList.remove('hidden');
+      const regCancel = document.getElementById('btn-cancel-reg');
+      if (regCancel) regCancel.classList.add('hidden');
+      const regStart = document.getElementById('btn-start-reg');
+      if (regStart) regStart.disabled = false;
+      ['reg-roll', 'reg-name', 'reg-class'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input) input.disabled = false;
+      });
+      if (wasRegistering) {
+        document.getElementById('reg-feedback').innerText = "Capture cancelled. Your student details are still here.";
+        document.getElementById('reg-sample-count').innerText = '0 / 10';
+        document.getElementById('reg-progress').style.width = '0%';
+      }
+
+      const placeholder = document.getElementById('cam-placeholder');
+      if (placeholder) placeholder.classList.remove('hidden');
+      const canvas = document.getElementById('overlay-canvas');
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      const aiStatus = document.getElementById('ai-status');
+      if (aiStatus) {
+        aiStatus.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-400"></span> Camera Idle`;
+        aiStatus.className = "text-xs font-semibold px-3 py-1.5 rounded-full bg-slate-100 text-slate-600 flex items-center gap-1.5";
+      }
+      const startAttendanceButton = document.getElementById('btn-start-att');
+      const stopAttendanceButton = document.getElementById('btn-stop-att');
+      if (startAttendanceButton) startAttendanceButton.disabled = false;
+      if (stopAttendanceButton) stopAttendanceButton.disabled = true;
+    }
+
+    async function sendFrameToAI() {
+      if (isProcessing) return;
+      const video = document.getElementById('webcam');
+      const canvas = document.getElementById('overlay-canvas');
+      if (!video || video.videoWidth === 0) return;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+
+      const captureCanvas = document.createElement('canvas');
+      captureCanvas.width = video.videoWidth;
+      captureCanvas.height = video.videoHeight;
+      const cctx = captureCanvas.getContext('2d');
+      cctx.drawImage(video, 0, 0);
+
+      const base64Data = captureCanvas.toDataURL('image/jpeg', 0.85);
+      isProcessing = true;
+      const controller = new AbortController();
+      recognitionController = controller;
+
+      try {
+        const res = await fetch('/api/recognize-frame', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64Data }),
+          signal: controller.signal
+        });
+        if (!res.ok) throw new Error(`Recognition request failed (${res.status})`);
+        const result = await res.json();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        result.faces.forEach(f => {
+          const [x, y, w, h] = f.box;
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = f.matched ? '#10b981' : '#ef4444';
+          ctx.strokeRect(x, y, w, h);
+          ctx.fillStyle = f.matched ? '#10b981' : '#ef4444';
+          ctx.fillRect(x, Math.max(0, y - 24), Math.max(w, 140), 24);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 12px sans-serif';
+          ctx.fillText(f.label, x + 6, Math.max(16, y - 7));
+        });
+
+        if (result.match) {
+          loadDashboard();
+          showMatchModal(result.match);
+          if (document.getElementById('stop-after-match').checked) {
+            stopCamera();
+          }
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') console.error("Frame recognition error:", err);
+        if (err.name !== 'AbortError' && currentStream) {
+          stopCamera();
+          showToast("Face recognition stopped because the server couldn't process a camera frame.", 'error');
+        }
+      } finally {
+        if (recognitionController === controller) {
+          recognitionController = null;
+          isProcessing = false;
+        }
+      }
+    }
+
+    function showMatchModal(match) {
+      const now = Date.now();
+      if (lastAnnouncedRoll === match.student.roll_no && (now - lastAnnouncedTime) < 5000) {
+        return;
+      }
+      lastAnnouncedRoll = match.student.roll_no;
+      lastAnnouncedTime = now;
+
+      playBeep();
+      const isNew = (match.status === 'new' || match.status === 'updated');
+      const statusBadge = document.getElementById('modal-time');
+
+      document.getElementById('modal-name').innerText = match.student.name;
+      document.getElementById('modal-details').innerText = `Roll No: ${match.student.roll_no} • Class ${match.student.class}`;
+
+      if (isNew) {
+        statusBadge.innerText = `✔ PRESENT at ${match.when}`;
+        statusBadge.className = "mt-4 py-2 px-3 bg-emerald-50 text-emerald-700 font-bold rounded-xl text-sm border border-emerald-200";
+        speakText(`${match.student.name}, Present`);
+      } else {
+        statusBadge.innerText = `ℹ ALREADY MARKED at ${match.when}`;
+        statusBadge.className = "mt-4 py-2 px-3 bg-amber-50 text-amber-700 font-bold rounded-xl text-sm border border-amber-200";
+        speakText(`${match.student.name}, Already marked`);
+      }
+
+      const img = document.getElementById('modal-photo');
+      if (match.photo_url) {
+        img.src = match.photo_url;
+        img.classList.remove('hidden');
+      } else {
+        img.classList.add('hidden');
+      }
+
+      document.getElementById('match-modal').classList.remove('hidden');
+
+      if (popupTimer) clearTimeout(popupTimer);
+
+      popupTimer = setTimeout(() => {
+        closeMatchModal();
+      }, 2500);
+    }
+
+    function closeMatchModal() {
+      if (popupTimer) {
+        clearTimeout(popupTimer);
+        popupTimer = null;
+      }
+      document.getElementById('match-modal').classList.add('hidden');
+    }
+
+    async function startRegistrationProcess() {
+      if (registrationInProgress) return;
+      const roll = document.getElementById('reg-roll').value.trim();
+      const name = document.getElementById('reg-name').value.trim();
+      const cls = document.getElementById('reg-class').value.trim();
+
+      if (!roll || !name || !cls) {
+        showToast("Enter the roll number, full name, and class before capturing.", 'error');
+        document.getElementById(!roll ? 'reg-roll' : !name ? 'reg-name' : 'reg-class').focus();
+        return;
+      }
+
+      const startButton = document.getElementById('btn-start-reg');
+      startButton.disabled = true;
+      const rollAvailable = await checkRollAvailability(roll);
+      if (!rollAvailable) {
+        showToast("This roll number is already registered or could not be verified.", 'error');
+        startButton.disabled = false;
+        document.getElementById('reg-roll').focus();
+        return;
+      }
+
+      const runId = ++registrationRunId;
+      const video = document.getElementById('reg-webcam');
+      const overlay = document.getElementById('reg-overlay');
+      const progress = document.getElementById('reg-progress');
+      const countLabel = document.getElementById('reg-sample-count');
+      const feedback = document.getElementById('reg-feedback');
+      const cancelButton = document.getElementById('btn-cancel-reg');
+      const inputs = ['reg-roll', 'reg-name', 'reg-class'].map(id => document.getElementById(id));
+      registrationInProgress = true;
+      startButton.disabled = true;
+      cancelButton.classList.remove('hidden');
+      inputs.forEach(input => { input.disabled = true; });
+      feedback.innerText = "Waiting for camera permission...";
+
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("Camera access is not available. Open this page on localhost or use HTTPS.");
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+        if (runId !== registrationRunId) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+        currentStream = stream;
+        video.srcObject = currentStream;
+        await video.play();
+        if (video.readyState < 2) {
+          await new Promise(resolve => video.addEventListener('loadeddata', resolve, { once: true }));
+        }
+        if (runId !== registrationRunId) return;
+        overlay.classList.add('hidden');
+        video.closest('.camera-viewport').classList.add('is-scanning');
+
+        const poses = [
+          "Look straight at the camera", "Hold your head steady",
+          "Tilt slightly LEFT", "Hold that angle",
+          "Tilt slightly RIGHT", "Hold that angle",
+          "Look slightly UP", "Look slightly DOWN",
+          "Smile gently", "Look straight and hold steady"
+        ];
+
+        const capturedFrames = [];
+        const canvas = document.createElement('canvas');
+        canvas.width = 640;
+        canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+
+        feedback.innerText = "Center one face in the frame. Capture starts in 2 seconds...";
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        if (runId !== registrationRunId) return;
+
+        for (let i = 0; i < poses.length; i++) {
+          feedback.innerText = `Step ${i + 1} of 10: ${poses[i]}`;
+          document.getElementById('reg-prompt').innerText = poses[i];
+          await new Promise(resolve => setTimeout(resolve, 650));
+          if (runId !== registrationRunId) return;
+          if (!video.videoWidth || !video.videoHeight) throw new Error("Camera preview stopped. Please try again.");
+
+          ctx.drawImage(video, 0, 0, 640, 480);
+          capturedFrames.push(canvas.toDataURL('image/jpeg', 0.85));
+          countLabel.innerText = `${i + 1} / 10`;
+          progress.style.width = `${((i + 1) / poses.length) * 100}%`;
+        }
+
+        feedback.innerText = "Samples captured. Creating the face profile...";
+        document.getElementById('reg-prompt').innerText = "Creating secure face profile...";
+
+        const formData = new FormData();
+        formData.append("roll", roll);
+        formData.append("name", name);
+        formData.append("cls", cls);
+        capturedFrames.forEach(frame => formData.append("frames", frame));
+
+        const res = await fetch('/api/register-samples', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || `Registration failed (${res.status})`);
+        if (runId !== registrationRunId) return;
+
+        showToast(data.message || "Student registered successfully.", 'success');
+        inputs.forEach(input => { input.value = ''; });
+        progress.style.width = '0%';
+        countLabel.innerText = '0 / 10';
+        switchTab('students');
+      } catch (err) {
+        if (runId !== registrationRunId) return;
+        console.error("Student registration failed:", err);
+        showToast(err.message || "Registration failed. Please try again.", 'error');
+        feedback.innerText = err.message || "Registration failed. Please check the details and try again.";
+        document.getElementById('reg-prompt').innerText = "Capture could not be completed";
+        stopCamera();
+      } finally {
+        if (runId === registrationRunId) {
+          registrationInProgress = false;
+          startButton.disabled = false;
+          cancelButton.classList.add('hidden');
+          inputs.forEach(input => { input.disabled = false; });
+        }
+      }
+    }
+
+    async function fetchRecords() {
+      const date = document.getElementById('record-date').value;
+      const tbody = document.getElementById('records-table-body');
+      document.getElementById('records-count').innerText = 'Loading...';
+      tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-slate-400">Loading...</td></tr>`;
+
+      try {
+        const res = await fetch(`/api/records?date=${encodeURIComponent(date)}`);
+        if (!res.ok) throw new Error(`Records request failed (${res.status})`);
+        const data = await res.json();
+        document.getElementById('records-count').innerText = `${data.records.length} ${data.records.length === 1 ? 'record' : 'records'}`;
+        if (data.records.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="5" class="py-10 text-center text-slate-400">No attendance records found for ${escapeHtml(date)}.</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = data.records.map(r => `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="py-3 px-4 text-xs font-semibold tabular-nums text-slate-500">${escapeHtml(r.time || '--:--')}</td>
+            <td class="py-3 px-4 font-bold text-slate-800">${escapeHtml(r.roll_no)}</td>
+            <td class="py-3 px-4 font-medium">${escapeHtml(r.name)}</td>
+            <td class="py-3 px-4 text-slate-500">${escapeHtml(r.class)}</td>
+            <td class="py-3 px-4">
+              <span class="inline-flex px-2 py-0.5 text-xs font-bold rounded-full ${r.status === 'Present' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}">
+                ${escapeHtml(r.status)}
+              </span>
+            </td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        console.error("Records load failed:", err);
+        document.getElementById('records-count').innerText = 'Unavailable';
+        tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-rose-500">Failed to load records.</td></tr>`;
+        showToast("Couldn't load attendance records. Please try again.", 'error');
+      }
+    }
+
+    async function markAbsentees() {
+      if (!confirm("Mark all unmarked students as Absent for today?")) return;
+      try {
+        const res = await fetch('/api/mark-absentees', { method: 'POST' });
+        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        const data = await res.json();
+        showToast(data.message, 'success');
+        await loadDashboard();
+      } catch (err) {
+        console.error("Mark absentees failed:", err);
+        showToast("Couldn't mark absentees. Please try again.", 'error');
+      }
+    }
+
+    async function fetchStudents() {
+      const tbody = document.getElementById('students-table-body');
+      tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-slate-400">Loading...</td></tr>`;
+
+      try {
+        const res = await fetch('/api/students');
+        if (!res.ok) throw new Error(`Student list request failed (${res.status})`);
+        const students = await res.json();
+        document.getElementById('student-count-badge').innerText = `${students.length} Enrolled`;
+
+        if (students.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-slate-500">No students registered. <button type="button" onclick="switchTab('register')" class="font-semibold text-indigo-600 hover:text-indigo-800">Add student</button></td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = students.map(s => `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="py-2 px-4">
+              <div class="w-9 h-9 rounded-full bg-slate-200 overflow-hidden border">
+                ${s.photo_url ? `<img src="${escapeHtml(s.photo_url)}" alt="" class="w-full h-full object-cover">` : `<div class="w-full h-full flex items-center justify-center text-xs text-slate-400">N/A</div>`}
+              </div>
+            </td>
+            <td class="py-3 px-4 font-bold text-slate-800">${escapeHtml(s.roll_no)}</td>
+            <td class="py-3 px-4 font-medium">${escapeHtml(s.name)}</td>
+            <td class="py-3 px-4 text-slate-500">${escapeHtml(s.class)}</td>
+            <td class="py-3 px-4 text-right">
+              <button onclick="deleteStudent('${escapeHtml(s.roll_no)}')" class="text-rose-500 hover:text-rose-700 text-xs font-semibold">
+                Delete
+              </button>
+            </td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        console.error("Student directory load failed:", err);
+        tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-rose-500">Failed to load students.</td></tr>`;
+        showToast("Couldn't load the student directory. Please try again.", 'error');
+      }
+    }
+
+    async function deleteStudent(roll) {
+      if (!confirm(`Delete student with roll no ${roll}? This will remove their face embeddings.`)) return;
+      try {
+        const res = await fetch(`/api/students/${encodeURIComponent(roll)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`Delete request failed (${res.status})`);
+        showToast(`Student ${roll} deleted.`, 'success');
+        await Promise.all([fetchStudents(), loadDashboard()]);
+      } catch (err) {
+        console.error("Student deletion failed:", err);
+        showToast("Couldn't delete this student. Please try again.", 'error');
+      }
+    }
+  </script>
+</body>
+</html>
