@@ -23,7 +23,7 @@ from pydantic import BaseModel
 # ----------------------------------------------------------------------------
 # 1. CONFIGURATION
 # ----------------------------------------------------------------------------
-SCHOOL_NAME = os.getenv("SCHOOL_NAME", "Sunrise Public School")
+SCHOOL_NAME = os.getenv("SCHOOL_NAME", "Government Sandipani Vidyalaya")
 MATCH_THRESHOLD = 0.45
 MATCH_MARGIN = 0.05
 LOW_ATTENDANCE_PERCENT = 75
@@ -57,7 +57,7 @@ MODEL_FILES = {
 }
 
 # ----------------------------------------------------------------------------
-# 2. POSTGRESQL DATABASE SETUP
+# 2. POSTGRESQL DATABASE SETUP (UNIQUE PER ROLL NO + CLASS)
 # ----------------------------------------------------------------------------
 def get_conn():
     if not DATABASE_URL:
@@ -69,12 +69,14 @@ def init_db():
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS students (
-                roll_no TEXT PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
+                roll_no TEXT NOT NULL,
                 name TEXT NOT NULL,
                 class TEXT NOT NULL,
                 registered_on TEXT NOT NULL,
                 embedding BYTEA NOT NULL,
-                photo BYTEA
+                photo BYTEA,
+                UNIQUE (roll_no, class)
             );
         """)
         cur.execute("""
@@ -82,11 +84,12 @@ def init_db():
                 id SERIAL PRIMARY KEY,
                 date TEXT NOT NULL,
                 time TEXT NOT NULL DEFAULT '',
-                roll_no TEXT NOT NULL REFERENCES students(roll_no) ON DELETE CASCADE,
+                student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+                roll_no TEXT NOT NULL,
                 name TEXT NOT NULL,
                 class TEXT NOT NULL,
                 status TEXT NOT NULL,
-                UNIQUE (date, roll_no)
+                UNIQUE (date, student_id)
             );
         """)
         conn.commit()
@@ -117,29 +120,33 @@ def from_bytes(raw: bytes) -> np.ndarray:
 def load_students():
     with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("""
-            SELECT roll_no, name, class, registered_on,
+            SELECT id, roll_no, name, class, registered_on,
                    (embedding IS NOT NULL) AS has_face,
                    (photo IS NOT NULL) AS has_photo
             FROM students
-            ORDER BY roll_no;
+            ORDER BY class, roll_no;
         """)
         rows = cur.fetchall()
     return [
         {
+            "id": r["id"],
             "roll_no": r["roll_no"],
             "name": r["name"],
             "class": r["class"],
             "registered_on": r["registered_on"],
             "has_face": r["has_face"],
-            "photo_url": f"/photos/{r['roll_no']}.jpg" if r["has_photo"] else None,
+            "photo_url": f"/photos/{r['id']}.jpg" if r["has_photo"] else None,
         }
         for r in rows
     ]
 
 
-def roll_exists(roll: str) -> bool:
+def roll_exists_in_class(roll: str, cls: str) -> bool:
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM students WHERE LOWER(roll_no) = LOWER(%s);", (roll.strip(),))
+        cur.execute(
+            "SELECT 1 FROM students WHERE LOWER(roll_no) = LOWER(%s) AND LOWER(class) = LOWER(%s);",
+            (roll.strip(), cls.strip()),
+        )
         return cur.fetchone() is not None
 
 
@@ -147,23 +154,23 @@ def load_attendance(date: Optional[str] = None):
     with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         if date:
             cur.execute(
-                "SELECT date, time, roll_no, name, class, status FROM attendance WHERE date = %s;",
+                "SELECT date, time, student_id, roll_no, name, class, status FROM attendance WHERE date = %s;",
                 (date,),
             )
         else:
-            cur.execute("SELECT date, time, roll_no, name, class, status FROM attendance;")
+            cur.execute("SELECT date, time, student_id, roll_no, name, class, status FROM attendance;")
         return [dict(r) for r in cur.fetchall()]
 
 
 def mark_attendance(student: dict, status: str = "Present"):
     date = today_str()
     when = get_ist_now().strftime("%H:%M:%S")
-    roll = student["roll_no"]
+    student_id = student["id"]
 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT id, status, time FROM attendance WHERE date = %s AND roll_no = %s;",
-            (date, roll),
+            "SELECT id, status, time FROM attendance WHERE date = %s AND student_id = %s;",
+            (date, student_id),
         )
         row = cur.fetchone()
         if row:
@@ -179,10 +186,10 @@ def mark_attendance(student: dict, status: str = "Present"):
 
         cur.execute(
             """
-            INSERT INTO attendance (date, time, roll_no, name, class, status)
-            VALUES (%s, %s, %s, %s, %s, %s);
+            INSERT INTO attendance (date, time, student_id, roll_no, name, class, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s);
             """,
-            (date, when, roll, student["name"], student["class"], status),
+            (date, when, student_id, student["roll_no"], student["name"], student["class"], status),
         )
         conn.commit()
         return "new", when
@@ -193,12 +200,12 @@ def mark_absentees():
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO attendance (date, time, roll_no, name, class, status)
-            SELECT %s, '', s.roll_no, s.name, s.class, 'Absent'
+            INSERT INTO attendance (date, time, student_id, roll_no, name, class, status)
+            SELECT %s, '', s.id, s.roll_no, s.name, s.class, 'Absent'
             FROM students s
             WHERE NOT EXISTS (
                 SELECT 1 FROM attendance a
-                WHERE a.date = %s AND a.roll_no = s.roll_no
+                WHERE a.date = %s AND a.student_id = s.id
             );
             """,
             (date, date),
@@ -214,7 +221,7 @@ def make_summary_csv() -> str:
     present = defaultdict(int)
     for r in rows:
         if r["status"] == "Present":
-            present[str(r["roll_no"]).strip()] += 1
+            present[r["student_id"]] += 1
 
     output = io.StringIO()
     fields = ["roll_no", "name", "class", "days_present", "total_days", "percentage", "remark"]
@@ -222,7 +229,7 @@ def make_summary_csv() -> str:
     writer.writeheader()
 
     for s in load_students():
-        days = present[str(s["roll_no"]).strip()]
+        days = present[s["id"]]
         percent = round(100 * days / total_days, 1) if total_days else 0.0
         writer.writerow({
             "roll_no": s["roll_no"],
@@ -296,20 +303,21 @@ class FaceDB:
         students = {}
         mats, owners = [], []
         with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT roll_no, name, class, registered_on, embedding, (photo IS NOT NULL) AS has_photo FROM students;")
+            cur.execute("SELECT id, roll_no, name, class, registered_on, embedding, (photo IS NOT NULL) AS has_photo FROM students;")
             for r in cur.fetchall():
-                roll = r["roll_no"]
-                students[roll] = {
-                    "roll_no": roll,
+                sid = r["id"]
+                students[sid] = {
+                    "id": sid,
+                    "roll_no": r["roll_no"],
                     "name": r["name"],
                     "class": r["class"],
                     "registered_on": r["registered_on"],
-                    "photo_url": f"/photos/{roll}.jpg" if r["has_photo"] else None,
+                    "photo_url": f"/photos/{sid}.jpg" if r["has_photo"] else None,
                 }
                 if r["embedding"]:
                     emb = from_bytes(r["embedding"])
                     mats.append(emb)
-                    owners += [roll] * len(emb)
+                    owners += [sid] * len(emb)
 
         self.students = students
         self.matrix = np.vstack(mats).astype(np.float32) if mats else np.empty((0, 128), np.float32)
@@ -324,12 +332,12 @@ class FaceDB:
             if sc > best.get(owner, -1.0):
                 best[owner] = float(sc)
         ranked = sorted(best.items(), key=lambda kv: kv[1], reverse=True)
-        roll, score = ranked[0]
+        sid, score = ranked[0]
         if score < MATCH_THRESHOLD:
             return None, score
         if len(ranked) > 1 and score - ranked[1][1] < MATCH_MARGIN:
             return None, score
-        return roll, score
+        return sid, score
 
     def find_duplicate(self, emb):
         if not self.owners:
@@ -341,8 +349,8 @@ class FaceDB:
                 best[owner] = float(score)
         if not best:
             return None
-        roll, score = max(best.items(), key=lambda item: item[1])
-        return roll if score >= MATCH_THRESHOLD else None
+        sid, score = max(best.items(), key=lambda item: item[1])
+        return sid if score >= MATCH_THRESHOLD else None
 
 
 init_db()
@@ -382,10 +390,10 @@ def index():
     return "<h1>Frontend index.html not found in static/ directory.</h1>"
 
 
-@app.get("/photos/{roll}.jpg")
-def get_student_photo(roll: str):
+@app.get("/photos/{student_id}.jpg")
+def get_student_photo(student_id: int):
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT photo FROM students WHERE roll_no = %s;", (roll,))
+        cur.execute("SELECT photo FROM students WHERE id = %s;", (student_id,))
         row = cur.fetchone()
     if not row or not row[0]:
         raise HTTPException(status_code=404, detail="Photo not found")
@@ -406,8 +414,8 @@ def login(payload: LoginPayload):
 def get_dashboard():
     students = load_students()
     today_records = load_attendance(today_str())
-    present_set = {r["roll_no"] for r in today_records if r["status"] == "Present"}
-    absent_set = {r["roll_no"] for r in today_records if r["status"] == "Absent"}
+    present_set = {r["student_id"] for r in today_records if r["status"] == "Present"}
+    absent_set = {r["student_id"] for r in today_records if r["status"] == "Absent"}
 
     return {
         "school_name": SCHOOL_NAME,
@@ -436,15 +444,15 @@ def recognize_frame(payload: FramePayload):
     for face in faces[:5]:
         box = [int(v) for v in face[:4]]
         emb = engine.embed(frame, face)
-        roll, score = face_db.identify(emb)
+        sid, score = face_db.identify(emb)
 
-        if roll and roll in face_db.students:
-            student = face_db.students[roll]
+        if sid and sid in face_db.students:
+            student = face_db.students[sid]
             detected_list.append({
                 "box": box,
                 "label": f"{student['name']} ({score:.2f})",
                 "matched": True,
-                "roll": roll,
+                "roll": student["roll_no"],
             })
             if matched_student is None:
                 matched_student = student
@@ -484,8 +492,8 @@ def register_samples(
         raise HTTPException(status_code=400, detail="Roll number must contain letters, numbers, '-' or '_' only")
     if not name or not cls:
         raise HTTPException(status_code=400, detail="Student name and class are required")
-    if roll_exists(roll):
-        raise HTTPException(status_code=400, detail=f"Roll number {roll} already exists")
+    if roll_exists_in_class(roll, cls):
+        raise HTTPException(status_code=400, detail=f"Roll number {roll} already exists in {cls}")
 
     embeddings = []
     photo_bytes = None
@@ -519,14 +527,14 @@ def register_samples(
     mean_emb /= np.linalg.norm(mean_emb)
 
     with registration_lock:
-        if roll_exists(roll):
-            raise HTTPException(status_code=400, detail=f"Roll number {roll} already exists")
-        dup_roll = face_db.find_duplicate(mean_emb)
-        if dup_roll:
-            other = face_db.students[dup_roll]
+        if roll_exists_in_class(roll, cls):
+            raise HTTPException(status_code=400, detail=f"Roll number {roll} already exists in {cls}")
+        dup_sid = face_db.find_duplicate(mean_emb)
+        if dup_sid:
+            other = face_db.students[dup_sid]
             raise HTTPException(
                 status_code=400,
-                detail=f"This face is already registered to {other['name']} (Roll: {dup_roll})",
+                detail=f"This face is already registered to {other['name']} (Roll: {other['roll_no']}, {other['class']})",
             )
 
         with get_conn() as conn, conn.cursor() as cur:
@@ -547,18 +555,25 @@ def register_samples(
             conn.commit()
         face_db.reload()
 
-    return {"message": f"Successfully registered {name}"}
+    return {"message": f"Successfully registered {name} ({cls})"}
 
 
 @app.get("/api/students/check-roll")
-def check_roll_number(roll: str):
+def check_roll_number(roll: str, cls: str = ""):
     normalized_roll = roll.strip()
+    normalized_cls = cls.strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]+", normalized_roll):
         return {"available": False, "message": "Use letters, numbers, '-' or '_' only."}
-    exists = roll_exists(normalized_roll)
+    if not normalized_cls:
+        return {"available": True, "message": "Enter class to verify roll number availability."}
+    exists = roll_exists_in_class(normalized_roll, normalized_cls)
     return {
         "available": not exists,
-        "message": f"Roll number {normalized_roll} is already registered." if exists else "Roll number is available.",
+        "message": (
+            f"Roll number {normalized_roll} is already registered in {normalized_cls}."
+            if exists
+            else f"Roll number {normalized_roll} is available in {normalized_cls}."
+        ),
     }
 
 
@@ -574,10 +589,10 @@ def get_students():
     return load_students()
 
 
-@app.delete("/api/students/{roll}")
-def delete_student_api(roll: str):
+@app.delete("/api/students/{student_id}")
+def delete_student_api(student_id: int):
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM students WHERE roll_no = %s;", (roll,))
+        cur.execute("DELETE FROM students WHERE id = %s;", (student_id,))
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Student not found")
         conn.commit()
