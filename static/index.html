@@ -993,14 +993,15 @@
       setTimeout(() => document.getElementById('login-username').focus(), 100);
     }
 
-    function showApp(username) {
-      currentAdmin = username;
-      document.getElementById('login-screen').classList.add('hidden');
-      document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('app-root').classList.remove('hidden');
-      document.getElementById('admin-username-label').innerText = username || 'admin';
-      lucide.createIcons();
-    }
+function showApp(username) {
+  currentAdmin = username;
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-root').classList.remove('hidden');
+  document.getElementById('admin-username-label').innerText = username || 'admin';
+  lucide.createIcons();
+  loadDashboard();
+}
 
     function applySession(username) {
       try {
