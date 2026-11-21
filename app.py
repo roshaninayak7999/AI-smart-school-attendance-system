@@ -1,9 +1,10 @@
+import base64
 import csv
 import datetime
+import io
 import os
 import re
 import shutil
-import base64
 import threading
 from collections import defaultdict
 from pathlib import Path
@@ -11,41 +12,38 @@ from typing import Optional
 
 import cv2
 import numpy as np
-import gspread
-from google.oauth2.service_account import Credentials
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from fastapi import FastAPI, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # ----------------------------------------------------------------------------
-# 1. CONFIGURATION & DIRECTORIES
+# 1. CONFIGURATION
 # ----------------------------------------------------------------------------
-SCHOOL_NAME = "Sunrise Public School"
+SCHOOL_NAME = os.getenv("SCHOOL_NAME", "Sunrise Public School")
 MATCH_THRESHOLD = 0.45
 MATCH_MARGIN = 0.05
 LOW_ATTENDANCE_PERCENT = 75
 
 ADMIN_CREDENTIALS = {
-    "admin": "admin123",
+    os.getenv("ADMIN_USERNAME", "admin"): os.getenv("ADMIN_PASSWORD", "admin123"),
 }
 
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
 MODEL_DIR = BASE_DIR / "models"
 STATIC_DIR = BASE_DIR / "static"
-EMB_DIR = DATA_DIR / "embeddings"
-PHOTO_DIR = DATA_DIR / "photos"
-REPORT_DIR = DATA_DIR / "reports"
-STUDENTS_CSV = DATA_DIR / "students.csv"
-CREDENTIALS_FILE = BASE_DIR / "credentials.json"
+
+for folder in (MODEL_DIR, STATIC_DIR):
+    folder.mkdir(parents=True, exist_ok=True)
 
 registration_lock = threading.Lock()
-sheet_lock = threading.Lock()
-
-STUDENT_FIELDS = ["roll_no", "name", "class", "registered_on"]
-ATT_FIELDS = ["date", "time", "roll_no", "name", "class", "status"]
 
 MODEL_FILES = {
     "face_detection_yunet_2023mar.onnx": (100_000, [
@@ -59,184 +57,191 @@ MODEL_FILES = {
 }
 
 # ----------------------------------------------------------------------------
-# 2. GOOGLE SHEETS & STORAGE ENGINE
+# 2. POSTGRESQL DATABASE SETUP
 # ----------------------------------------------------------------------------
-sheet = None
+def get_conn():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL environment variable set nahi hai!")
+    return psycopg2.connect(DATABASE_URL)
 
-def init_google_sheet():
-    global sheet
-    if CREDENTIALS_FILE.exists():
-        try:
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ]
-            creds = Credentials.from_service_account_file(str(CREDENTIALS_FILE), scopes=scopes)
-            client = gspread.authorize(creds)
-            sheet = client.open("School_Attendance").sheet1
-            print("Successfully connected to Google Sheets!")
-        except Exception as e:
-            print(f"Warning: Could not connect to Google Sheets ({e}). Falling back to local CSV.")
-            sheet = None
-    else:
-        print("Warning: credentials.json not found! Falling back to local CSV.")
-        sheet = None
 
-def init_storage():
-    for folder in (DATA_DIR, MODEL_DIR, EMB_DIR, PHOTO_DIR, REPORT_DIR, STATIC_DIR):
-        folder.mkdir(parents=True, exist_ok=True)
-    if not STUDENTS_CSV.exists():
-        with open(STUDENTS_CSV, "w", newline="", encoding="utf-8-sig") as f:
-            csv.writer(f).writerow(STUDENT_FIELDS)
-    init_google_sheet()
+def init_db():
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS students (
+                roll_no TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                class TEXT NOT NULL,
+                registered_on TEXT NOT NULL,
+                embedding BYTEA NOT NULL,
+                photo BYTEA
+            );
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS attendance (
+                id SERIAL PRIMARY KEY,
+                date TEXT NOT NULL,
+                time TEXT NOT NULL DEFAULT '',
+                roll_no TEXT NOT NULL REFERENCES students(roll_no) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                class TEXT NOT NULL,
+                status TEXT NOT NULL,
+                UNIQUE (date, roll_no)
+            );
+        """)
+        conn.commit()
+
 
 def get_ist_now():
     ist = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
     return datetime.datetime.now(ist)
 
+
 def today_str():
     return get_ist_now().date().isoformat()
 
-def read_csv(path):
-    if not path.exists():
-        return []
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        return [row for row in csv.DictReader(f)]
 
-def write_csv(path, fields, rows):
-    with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+def to_bytes(arr: np.ndarray) -> bytes:
+    buf = io.BytesIO()
+    np.save(buf, arr.astype(np.float32))
+    return buf.getvalue()
 
+
+def from_bytes(raw: bytes) -> np.ndarray:
+    return np.load(io.BytesIO(bytes(raw)))
+
+
+# ----------------------------------------------------------------------------
+# 3. DATABASE QUERIES
+# ----------------------------------------------------------------------------
 def load_students():
-    return read_csv(STUDENTS_CSV)
+    with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""
+            SELECT roll_no, name, class, registered_on,
+                   (embedding IS NOT NULL) AS has_face,
+                   (photo IS NOT NULL) AS has_photo
+            FROM students
+            ORDER BY roll_no;
+        """)
+        rows = cur.fetchall()
+    return [
+        {
+            "roll_no": r["roll_no"],
+            "name": r["name"],
+            "class": r["class"],
+            "registered_on": r["registered_on"],
+            "has_face": r["has_face"],
+            "photo_url": f"/photos/{r['roll_no']}.jpg" if r["has_photo"] else None,
+        }
+        for r in rows
+    ]
 
-def add_student(roll, name, cls):
-    if any(s["roll_no"].strip().casefold() == roll.strip().casefold() for s in load_students()):
-        raise ValueError(f"Roll number {roll} already exists.")
-    with open(STUDENTS_CSV, "a", newline="", encoding="utf-8") as f:
-        csv.DictWriter(f, fieldnames=STUDENT_FIELDS).writerow(
-            {"roll_no": roll, "name": name, "class": cls, "registered_on": today_str()}
-        )
 
-def delete_student(roll):
-    rows = [s for s in load_students() if s["roll_no"] != roll]
-    write_csv(STUDENTS_CSV, STUDENT_FIELDS, rows)
-    for path in (EMB_DIR / f"{roll}.npy", PHOTO_DIR / f"{roll}.jpg"):
-        if path.exists():
-            path.unlink()
+def roll_exists(roll: str) -> bool:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM students WHERE LOWER(roll_no) = LOWER(%s);", (roll.strip(),))
+        return cur.fetchone() is not None
 
-def load_attendance(date=None):
-    global sheet
-    if sheet:
-        with sheet_lock:
-            try:
-                records = sheet.get_all_records()
-                formatted = [
-                    {
-                        "date": str(r.get("date", "")),
-                        "time": str(r.get("time", "")),
-                        "roll_no": str(r.get("roll_no", "")),
-                        "name": str(r.get("name", "")),
-                        "class": str(r.get("class", "")),
-                        "status": str(r.get("status", ""))
-                    }
-                    for r in records
-                ]
-                return [r for r in formatted if r["date"] == date] if date else formatted
-            except Exception as e:
-                print(f"Error fetching from Google Sheet: {e}")
-                return []
-    return []
 
-def mark_attendance(student, status="Present"):
-    global sheet
+def load_attendance(date: Optional[str] = None):
+    with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        if date:
+            cur.execute(
+                "SELECT date, time, roll_no, name, class, status FROM attendance WHERE date = %s;",
+                (date,),
+            )
+        else:
+            cur.execute("SELECT date, time, roll_no, name, class, status FROM attendance;")
+        return [dict(r) for r in cur.fetchall()]
+
+
+def mark_attendance(student: dict, status: str = "Present"):
     date = today_str()
     when = get_ist_now().strftime("%H:%M:%S")
+    roll = student["roll_no"]
 
-    if not sheet:
-        return "error", when
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, status, time FROM attendance WHERE date = %s AND roll_no = %s;",
+            (date, roll),
+        )
+        row = cur.fetchone()
+        if row:
+            rec_id, old_status, old_time = row
+            if old_status == "Absent" and status == "Present":
+                cur.execute(
+                    "UPDATE attendance SET time = %s, status = 'Present' WHERE id = %s;",
+                    (when, rec_id),
+                )
+                conn.commit()
+                return "updated", when
+            return "exists", old_time or when
 
-    with sheet_lock:
-        try:
-            records = sheet.get_all_records()
-            for idx, r in enumerate(records, start=2):
-                if str(r.get("date")) == date and str(r.get("roll_no")).strip() == str(student["roll_no"]).strip():
-                    if r.get("status") == "Absent" and status == "Present":
-                        sheet.update_cell(idx, 2, when)
-                        sheet.update_cell(idx, 6, "Present")
-                        return "updated", when
-                    return "exists", str(r.get("time", when))
+        cur.execute(
+            """
+            INSERT INTO attendance (date, time, roll_no, name, class, status)
+            VALUES (%s, %s, %s, %s, %s, %s);
+            """,
+            (date, when, roll, student["name"], student["class"], status),
+        )
+        conn.commit()
+        return "new", when
 
-            sheet.append_row([
-                date,
-                when,
-                str(student["roll_no"]),
-                student["name"],
-                student["class"],
-                status
-            ])
-            return "new", when
-        except Exception as e:
-            print(f"Failed to append row in Google Sheet: {e}")
-            return "error", when
 
 def mark_absentees():
-    global sheet
-    if not sheet:
-        return 0
-
     date = today_str()
-    added = 0
-    with sheet_lock:
-        try:
-            records = sheet.get_all_records()
-            done = {str(r.get("roll_no")).strip() for r in records if str(r.get("date")) == date}
-            for s in load_students():
-                if str(s["roll_no"]).strip() not in done:
-                    sheet.append_row([
-                        date,
-                        "",
-                        str(s["roll_no"]),
-                        s["name"],
-                        s["class"],
-                        "Absent"
-                    ])
-                    added += 1
-        except Exception as e:
-            print(f"Error marking absentees in Google Sheet: {e}")
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO attendance (date, time, roll_no, name, class, status)
+            SELECT %s, '', s.roll_no, s.name, s.class, 'Absent'
+            FROM students s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM attendance a
+                WHERE a.date = %s AND a.roll_no = s.roll_no
+            );
+            """,
+            (date, date),
+        )
+        added = cur.rowcount
+        conn.commit()
     return added
 
-def make_summary_report():
+
+def make_summary_csv() -> str:
     rows = load_attendance()
     total_days = len({r["date"] for r in rows if r["date"]})
     present = defaultdict(int)
     for r in rows:
         if r["status"] == "Present":
             present[str(r["roll_no"]).strip()] += 1
-    out = []
+
+    output = io.StringIO()
+    fields = ["roll_no", "name", "class", "days_present", "total_days", "percentage", "remark"]
+    writer = csv.DictWriter(output, fieldnames=fields)
+    writer.writeheader()
+
     for s in load_students():
         days = present[str(s["roll_no"]).strip()]
         percent = round(100 * days / total_days, 1) if total_days else 0.0
-        out.append({
+        writer.writerow({
             "roll_no": s["roll_no"],
             "name": s["name"],
             "class": s["class"],
             "days_present": days,
             "total_days": total_days,
             "percentage": percent,
-            "remark": "Low attendance" if total_days and percent < LOW_ATTENDANCE_PERCENT else ""
+            "remark": "Low attendance" if total_days and percent < LOW_ATTENDANCE_PERCENT else "",
         })
-    path = REPORT_DIR / f"attendance_summary_{today_str()}.csv"
-    write_csv(path, ["roll_no", "name", "class", "days_present", "total_days", "percentage", "remark"], out)
-    return path
+    return output.getvalue()
+
 
 # ----------------------------------------------------------------------------
-# 3. FACE AI ENGINE
+# 4. FACE AI ENGINE
 # ----------------------------------------------------------------------------
 def ensure_models():
     import urllib.request
+
     paths = []
     for filename, (min_size, urls) in MODEL_FILES.items():
         dest = MODEL_DIR / filename
@@ -263,6 +268,7 @@ def ensure_models():
         paths.append(dest)
     return paths
 
+
 class FaceEngine:
     def __init__(self):
         yunet, sface = ensure_models()
@@ -281,22 +287,32 @@ class FaceEngine:
         norm = np.linalg.norm(vec)
         return vec / norm if norm else vec
 
+
 class FaceDB:
     def __init__(self):
         self.reload()
 
     def reload(self):
-        students = {s["roll_no"]: s for s in load_students()}
+        students = {}
         mats, owners = [], []
-        for roll in students:
-            path = EMB_DIR / f"{roll}.npy"
-            if path.exists():
-                emb = np.load(path)
-                mats.append(emb)
-                owners += [roll] * len(emb)
-        matrix = np.vstack(mats).astype(np.float32) if mats else np.empty((0, 128), np.float32)
+        with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT roll_no, name, class, registered_on, embedding, (photo IS NOT NULL) AS has_photo FROM students;")
+            for r in cur.fetchall():
+                roll = r["roll_no"]
+                students[roll] = {
+                    "roll_no": roll,
+                    "name": r["name"],
+                    "class": r["class"],
+                    "registered_on": r["registered_on"],
+                    "photo_url": f"/photos/{roll}.jpg" if r["has_photo"] else None,
+                }
+                if r["embedding"]:
+                    emb = from_bytes(r["embedding"])
+                    mats.append(emb)
+                    owners += [roll] * len(emb)
+
         self.students = students
-        self.matrix = matrix
+        self.matrix = np.vstack(mats).astype(np.float32) if mats else np.empty((0, 128), np.float32)
         self.owners = owners
 
     def identify(self, emb):
@@ -328,18 +344,18 @@ class FaceDB:
         roll, score = max(best.items(), key=lambda item: item[1])
         return roll if score >= MATCH_THRESHOLD else None
 
-init_storage()
+
+init_db()
 engine = FaceEngine()
 face_db = FaceDB()
 
 # ----------------------------------------------------------------------------
-# 4. FASTAPI APP & ENDPOINTS
+# 5. FASTAPI APP & ENDPOINTS
 # ----------------------------------------------------------------------------
 app = FastAPI(title="Smart Attendance System API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
-app.mount("/photos", StaticFiles(directory=str(PHOTO_DIR)), name="photos")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
 
 def decode_image_base64(b64_str: str):
     if "," in b64_str:
@@ -348,12 +364,15 @@ def decode_image_base64(b64_str: str):
     nparr = np.frombuffer(raw, np.uint8)
     return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
+
 class FramePayload(BaseModel):
     image: str
+
 
 class LoginPayload(BaseModel):
     username: str
     password: str
+
 
 @app.get("/", response_class=HTMLResponse)
 def index():
@@ -361,6 +380,17 @@ def index():
     if html_file.exists():
         return html_file.read_text(encoding="utf-8")
     return "<h1>Frontend index.html not found in static/ directory.</h1>"
+
+
+@app.get("/photos/{roll}.jpg")
+def get_student_photo(roll: str):
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT photo FROM students WHERE roll_no = %s;", (roll,))
+        row = cur.fetchone()
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return Response(content=bytes(row[0]), media_type="image/jpeg")
+
 
 @app.post("/api/login")
 def login(payload: LoginPayload):
@@ -370,6 +400,7 @@ def login(payload: LoginPayload):
     if expected is None or expected != password:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     return {"success": True, "username": username}
+
 
 @app.get("/api/dashboard")
 def get_dashboard():
@@ -387,9 +418,10 @@ def get_dashboard():
         "recent_attendance": sorted(
             [r for r in today_records if r["status"] == "Present"],
             key=lambda x: x["time"],
-            reverse=True
-        )[:15]
+            reverse=True,
+        )[:15],
     }
+
 
 @app.post("/api/recognize-frame")
 def recognize_frame(payload: FramePayload):
@@ -412,7 +444,7 @@ def recognize_frame(payload: FramePayload):
                 "box": box,
                 "label": f"{student['name']} ({score:.2f})",
                 "matched": True,
-                "roll": roll
+                "roll": roll,
             })
             if matched_student is None:
                 matched_student = student
@@ -421,24 +453,29 @@ def recognize_frame(payload: FramePayload):
                 "box": box,
                 "label": "Unknown",
                 "matched": False,
-                "roll": None
+                "roll": None,
             })
 
     mark_info = None
     if matched_student:
         status, when = mark_attendance(matched_student, "Present")
-        has_photo = (PHOTO_DIR / f"{matched_student['roll_no']}.jpg").exists()
         mark_info = {
             "status": status,
             "when": when,
             "student": matched_student,
-            "photo_url": f"/photos/{matched_student['roll_no']}.jpg" if has_photo else None
+            "photo_url": matched_student.get("photo_url"),
         }
 
     return {"faces": detected_list, "match": mark_info}
 
+
 @app.post("/api/register-samples")
-def register_samples(roll: str = Form(...), name: str = Form(...), cls: str = Form(...), frames: list[str] = Form(...)):
+def register_samples(
+    roll: str = Form(...),
+    name: str = Form(...),
+    cls: str = Form(...),
+    frames: list[str] = Form(...),
+):
     roll = roll.strip()
     name = name.strip()
     cls = cls.strip()
@@ -447,11 +484,11 @@ def register_samples(roll: str = Form(...), name: str = Form(...), cls: str = Fo
         raise HTTPException(status_code=400, detail="Roll number must contain letters, numbers, '-' or '_' only")
     if not name or not cls:
         raise HTTPException(status_code=400, detail="Student name and class are required")
-    if any(s["roll_no"].strip().casefold() == roll.casefold() for s in load_students()):
+    if roll_exists(roll):
         raise HTTPException(status_code=400, detail=f"Roll number {roll} already exists")
 
     embeddings = []
-    photo = None
+    photo_bytes = None
 
     for b64 in frames:
         frame = decode_image_base64(b64)
@@ -462,14 +499,17 @@ def register_samples(roll: str = Form(...), name: str = Form(...), cls: str = Fo
             face = faces[0]
             emb = engine.embed(frame, face)
             embeddings.append(emb)
-            if photo is None:
+            if photo_bytes is None:
                 x, y, w, h = [int(v) for v in face[:4]]
                 mx, my = int(w * 0.35), int(h * 0.35)
                 x0, y0 = max(0, x - mx), max(0, y - my)
                 crop = frame[y0:y + h + my, x0:x + w + mx]
                 if crop.size > 0:
                     scale = 200 / max(crop.shape[:2])
-                    photo = cv2.resize(crop, None, fx=scale, fy=scale)
+                    resized = cv2.resize(crop, None, fx=scale, fy=scale)
+                    ok, encoded = cv2.imencode(".jpg", resized)
+                    if ok:
+                        photo_bytes = encoded.tobytes()
 
     if len(embeddings) < 3:
         raise HTTPException(status_code=400, detail="Could not capture enough clear face angles. Try again.")
@@ -479,46 +519,48 @@ def register_samples(roll: str = Form(...), name: str = Form(...), cls: str = Fo
     mean_emb /= np.linalg.norm(mean_emb)
 
     with registration_lock:
-        if any(s["roll_no"].strip().casefold() == roll.casefold() for s in load_students()):
+        if roll_exists(roll):
             raise HTTPException(status_code=400, detail=f"Roll number {roll} already exists")
         dup_roll = face_db.find_duplicate(mean_emb)
         if dup_roll:
             other = face_db.students[dup_roll]
-            raise HTTPException(status_code=400, detail=f"This face is already registered to {other['name']} (Roll: {dup_roll})")
+            raise HTTPException(
+                status_code=400,
+                detail=f"This face is already registered to {other['name']} (Roll: {dup_roll})",
+            )
 
-        embedding_path = EMB_DIR / f"{roll}.npy"
-        photo_path = PHOTO_DIR / f"{roll}.jpg"
-        previous_students = load_students()
-        student_write_started = False
-        try:
-            np.save(embedding_path, emb_arr)
-            if photo is not None and not cv2.imwrite(str(photo_path), photo):
-                raise OSError("Could not save the student photo")
-            student_write_started = True
-            add_student(roll, name, cls)
-            face_db.reload()
-        except Exception:
-            if student_write_started:
-                write_csv(STUDENTS_CSV, STUDENT_FIELDS, previous_students)
-            for path in (embedding_path, photo_path):
-                if path.exists():
-                    path.unlink()
-            raise
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO students (roll_no, name, class, registered_on, embedding, photo)
+                VALUES (%s, %s, %s, %s, %s, %s);
+                """,
+                (
+                    roll,
+                    name,
+                    cls,
+                    today_str(),
+                    psycopg2.Binary(to_bytes(emb_arr)),
+                    psycopg2.Binary(photo_bytes) if photo_bytes else None,
+                ),
+            )
+            conn.commit()
+        face_db.reload()
+
     return {"message": f"Successfully registered {name}"}
+
 
 @app.get("/api/students/check-roll")
 def check_roll_number(roll: str):
     normalized_roll = roll.strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]+", normalized_roll):
         return {"available": False, "message": "Use letters, numbers, '-' or '_' only."}
-    exists = any(
-        student["roll_no"].strip().casefold() == normalized_roll.casefold()
-        for student in load_students()
-    )
+    exists = roll_exists(normalized_roll)
     return {
         "available": not exists,
-        "message": f"Roll number {normalized_roll} is already registered." if exists else "Roll number is available."
+        "message": f"Roll number {normalized_roll} is already registered." if exists else "Roll number is available.",
     }
+
 
 @app.get("/api/records")
 def get_records(date: Optional[str] = None):
@@ -526,35 +568,42 @@ def get_records(date: Optional[str] = None):
     records = load_attendance(target)
     return {"date": target, "records": sorted(records, key=lambda x: (x["status"] != "Present", x["name"]))}
 
+
 @app.get("/api/students")
 def get_students():
-    students = load_students()
-    for s in students:
-        s["has_face"] = (EMB_DIR / f"{s['roll_no']}.npy").exists()
-        s["photo_url"] = f"/photos/{s['roll_no']}.jpg" if (PHOTO_DIR / f"{s['roll_no']}.jpg").exists() else None
-    return students
+    return load_students()
+
 
 @app.delete("/api/students/{roll}")
 def delete_student_api(roll: str):
-    delete_student(roll)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM students WHERE roll_no = %s;", (roll,))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Student not found")
+        conn.commit()
     face_db.reload()
     return {"message": "Student deleted"}
+
 
 @app.post("/api/mark-absentees")
 def mark_absentees_api():
     count = mark_absentees()
     return {"count": count, "message": f"{count} students marked absent."}
 
+
 @app.get("/api/export-report")
 def export_report_api():
-    path = make_summary_report()
-    return FileResponse(path, filename=path.name, media_type="text/csv")
+    csv_data = make_summary_csv()
+    filename = f"attendance_summary_{today_str()}.csv"
+    return Response(
+        content=csv_data.encode("utf-8-sig"),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
-# ----------------------------------------------------------------------------
-# 5. DIRECT EXECUTION SUPPORT
-# ----------------------------------------------------------------------------
+
 if __name__ == "__main__":
     import uvicorn
-    print("\nStarting Smart Attendance Server at http://localhost:8000 ...\n")
-    print(f"Admin login -> username: '{list(ADMIN_CREDENTIALS.keys())[0]}'  (change ADMIN_CREDENTIALS in app.py)\n")
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
