@@ -3,5 +3,4 @@ uvicorn
 opencv-python-headless
 numpy
 python-multipart
-gspread
-google-auth
+psycopg2-binary
